@@ -1,3 +1,4 @@
 requests
 openpyxl
 pywin32
+anthropic  # only used when the "Anthropic API" AI service is selected

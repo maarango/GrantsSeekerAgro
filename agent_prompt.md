@@ -11,7 +11,7 @@ Today is {TODAY}.
 Give clear priority to calls matching these topics (relevance "Alta"), but still report other strong opportunities for the institutional focus.
 
 ## Your task
-Use WebSearch and WebFetch to find grant calls, research funding calls, fellowships, and capacity-building or innovation calls that are **currently OPEN or announced as FORTHCOMING** (deadline on or after {TODAY}, or no deadline yet published) and for which a Colombian public research institution or its researchers could plausibly apply.
+Use web search (and fetch official pages when you can) to find grant calls, research funding calls, fellowships, and capacity-building or innovation calls that are **currently OPEN or announced as FORTHCOMING** (deadline on or after {TODAY}, or no deadline yet published) and for which a Colombian public research institution or its researchers could plausibly apply.
 
 In this run, focus on this group of sources: **{GROUP}**
 
@@ -20,7 +20,7 @@ In this run, focus on this group of sources: **{GROUP}**
 You may also include other relevant funders you discover along the way. Be thorough: search each source above (official websites first), and use several searches per important funder.
 
 ## Rules
-1. Prefer the **official call page** URL (not news or aggregators). Use WebFetch to verify the deadline and status when possible.
+1. Prefer the **official call page** URL (not news or aggregators). Open the official page to verify the deadline and status when possible.
 2. Do NOT invent data. If a field is unknown, use an empty string "". Deadlines must be `YYYY-MM-DD` or "".
 3. Exclude calls whose deadline has already passed.
 4. Skip calls already in the KNOWN list below (same call/URL), unless their information changed significantly.

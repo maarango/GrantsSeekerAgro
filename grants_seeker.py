@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import datetime as dt
 import hashlib
 import html
@@ -27,6 +28,8 @@ import time
 from pathlib import Path
 
 import requests
+
+import ai_providers as ai
 
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
@@ -136,6 +139,69 @@ def detect_sync_folders() -> list[tuple[str, Path]]:
     return found
 
 
+def setup_ai(cur: dict, defaults: dict) -> dict:
+    """Wizard step: choose the AI service used for web research and sign in to it."""
+    import getpass
+
+    claude_cfg = deep_merge(defaults["claude"], cur.get("claude", {}))
+    current = (cur.get("ai") or {}).get("provider") or ("claude_code" if CONFIG_PATH.exists() else "")
+    keys = list(ai.PROVIDERS)
+    print("\n5) AI service used to search the web for calls (national sources, foundations, etc.).")
+    for i, k in enumerate(keys, 1):
+        if k == "claude_code":
+            state = "detected" if ai.available(k, claude_cfg) else "not installed"
+        elif k == "none":
+            state = ""
+        else:
+            state = "key stored" if ai.get_key(k) else ""
+        print(f"   {i}. {ai.PROVIDERS[k]['label']:<52} {state}")
+    if current in keys:
+        default_idx = str(keys.index(current) + 1)
+    elif ai.available("claude_code", claude_cfg):
+        default_idx = str(keys.index("claude_code") + 1)
+    else:
+        default_idx = str(len(keys))
+    while True:
+        choice = input(f"   Choose an option [{default_idx}]: ").strip() or default_idx
+        if choice.isdigit() and 1 <= int(choice) <= len(keys):
+            provider = keys[int(choice) - 1]
+            break
+        print("   Invalid option.")
+    info = ai.PROVIDERS[provider]
+    model = ""
+    if provider == "claude_code" and not ai.available(provider, claude_cfg):
+        print("   Claude Code is not installed. Install it from https://claude.com/claude-code,")
+        print("   then run `claude` once to sign in. The agent will use it automatically.")
+    if info.get("env"):
+        have = ai.get_key(provider)
+        print(f"   Get an API key at: {info['key_url']}")
+        if os.environ.get(info["env"]):
+            print(f"   Using the key from environment variable {info['env']}.")
+        else:
+            hint = ", Enter = keep stored key" if have else ""
+            while True:
+                key = getpass.getpass(f"   Paste API key (hidden{hint}): ").strip()
+                if key:
+                    ai.set_key(provider, key)
+                    print(f"   Key saved in Windows Credential Manager (GrantsSeekerAgro/{provider}).")
+                    break
+                if have:
+                    break
+                if provider == "anthropic":
+                    print("   No key: the Anthropic SDK will use ANTHROPIC_API_KEY or an `ant auth login` profile.")
+                    break
+                print("   An API key is required for this service.")
+        prev = cur.get("ai") or {}
+        old_model = prev.get("model") if prev.get("provider") == provider else ""
+        default_model = old_model or info["default_model"]
+        model = input(f"   Model [{default_model}]: ").strip() or default_model
+    if provider != "none":
+        if input("   Test the connection now? [Y/n]: ").strip().lower() in ("", "y", "s", "yes", "si"):
+            ok, msg = ai.test(provider, model or info["default_model"], claude_cfg, DATA)
+            print("   Connection OK." if ok else f"   Connection FAILED: {msg}\n   You can re-run setup later.")
+    return {"provider": provider, "model": model}
+
+
 def run_setup() -> None:
     """Interactive first-time / re-configuration wizard. Writes config.json."""
     cur = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
@@ -193,12 +259,16 @@ def run_setup() -> None:
     focus = ask("   Profile (Enter = keep current/default)", "")
     focus = focus or cur.get("research_focus") or defaults["research_focus"]
 
+    # 5) AI service
+    ai_cfg = setup_ai(cur, defaults)
+
     new = dict(cur)
     new.update({"email": {**cur.get("email", {}), "to": emails}, "output_folder": str(folder),
-                "topics": topics, "research_focus": focus})
+                "topics": topics, "research_focus": focus, "ai": ai_cfg})
     CONFIG_PATH.write_text(json.dumps(new, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nSaved {CONFIG_PATH.name}.  Email: {', '.join(emails)}\n  Folder: {folder}\n"
-          f"  Topics: {', '.join(topics) or '(default agricultural focus)'}")
+          f"  Topics: {', '.join(topics) or '(default agricultural focus)'}\n"
+          f"  AI service: {ai_cfg['provider']} {ai_cfg.get('model', '')}")
     print("Next: run  python grants_seeker.py daily   and   install_tasks.ps1  to schedule it.\n")
 
 
@@ -379,24 +449,37 @@ def source_eu_portal(cfg: dict) -> list[dict]:
     return list(out.values())
 
 
-def source_claude(cfg: dict, db: dict) -> list[dict]:
-    """Run one Claude research pass per source group, merging after each so later passes skip known calls."""
+SOURCE_LABEL = {"claude_code": "Claude", "anthropic": "Claude API", "openai": "OpenAI", "gemini": "Gemini"}
+
+
+def ai_provider(cfg: dict) -> tuple[str, str]:
+    """Resolve (provider, model) from config; legacy configs fall back to Claude Code."""
+    a = cfg.get("ai") or {}
+    provider = a.get("provider") or ("claude_code" if cfg["claude"].get("enabled", True) else "none")
+    model = a.get("model") or ai.PROVIDERS.get(provider, {}).get("default_model", "")
+    return provider, model
+
+
+def source_ai(cfg: dict, db: dict) -> list[dict]:
+    """Run one AI web-research pass per source group, merging after each so later passes skip known calls."""
+    provider, model = ai_provider(cfg)
+    if provider == "none":
+        return []
+    if not ai.available(provider, cfg["claude"]):
+        log.error("AI provider '%s' is not available (not signed in / no key). Run: python grants_seeker.py setup",
+                  provider)
+        return []
+    log.info("AI web research with %s %s", provider, model)
     out: list[dict] = []
     for group in cfg["claude"].get("search_groups") or [{"name": "General", "sources": ""}]:
-        items = claude_pass(cfg, db, group)
+        items = ai_pass(cfg, db, group, provider, model)
         merge(db, items)
         out += items
     return out
 
 
-def claude_pass(cfg: dict, db: dict, group: dict) -> list[dict]:
+def ai_pass(cfg: dict, db: dict, group: dict, provider: str, model: str) -> list[dict]:
     c = cfg["claude"]
-    exe = c.get("exe") if c.get("exe") and Path(c["exe"]).is_file() else shutil.which("claude")
-    if not exe and (Path.home() / ".local" / "bin" / "claude.exe").is_file():
-        exe = str(Path.home() / ".local" / "bin" / "claude.exe")
-    if not exe:
-        log.error("Claude CLI not found; skipping AI web research")
-        return []
     # Give the agent the known, still-relevant calls so it focuses on new ones.
     known = [r for r in db.values() if status_of(r) != "Cerrada" and not r["fuente"].endswith("(API)")]
     known_txt = "\n".join(f"- {r['titulo']} | {r['url']}" for r in known[-250:]) or "(none yet)"
@@ -409,26 +492,21 @@ def claude_pass(cfg: dict, db: dict, group: dict) -> list[dict]:
                     .replace("{GROUP}", group["name"])
                     .replace("{SOURCES}", group["sources"])
                     .replace("{KNOWN}", known_txt))
-    cmd = [exe, "-p", "--allowedTools", "WebSearch,WebFetch",
-           "--max-turns", str(c["max_turns"]), "--output-format", "text"]
-    log.info("Claude web research [%s] (timeout %s min)...", group["name"], c["timeout_minutes"])
+    log.info("Web research [%s] (timeout %s min)...", group["name"], c["timeout_minutes"])
     try:
-        proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
-                              timeout=c["timeout_minutes"] * 60, cwd=DATA,
-                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        log.error("Claude research timed out")
+        raw = ai.run(provider, prompt, model, c, DATA) or ""
+    except ai.ProviderError as e:
+        log.error("Web research [%s] failed: %s", group["name"], e)
         return []
-    raw = proc.stdout or ""
-    (DATA / f"last_claude_output_{re.sub(r'[^A-Za-z]+', '_', group['name'])[:40]}.txt").write_text(raw + "\n\nSTDERR:\n" + (proc.stderr or ""), encoding="utf-8")
+    (DATA / f"last_ai_output_{re.sub(r'[^A-Za-z]+', '_', group['name'])[:40]}.txt").write_text(raw, encoding="utf-8")
     m = re.search(r"<<<JSON\s*(\[.*\])\s*JSON>>>", raw, re.S) or re.search(r"(\[\s*\{.*\}\s*\])", raw, re.S)
     if not m:
-        log.error("Claude output had no JSON (exit %s). See data/last_claude_output.txt", proc.returncode)
+        log.error("AI output had no JSON. See data/last_ai_output_*.txt")
         return []
     try:
         items = json.loads(m.group(1))
     except json.JSONDecodeError as e:
-        log.error("Could not parse Claude JSON: %s", e)
+        log.error("Could not parse AI JSON: %s", e)
         return []
     out = []
     for it in items:
@@ -437,10 +515,10 @@ def claude_pass(cfg: dict, db: dict, group: dict) -> list[dict]:
         rec = {k: str(it.get(k, "") or "").strip() for k in FIELDS}
         rec["fecha_apertura"] = parse_date(rec["fecha_apertura"])
         rec["fecha_cierre"] = parse_date(rec["fecha_cierre"])
-        rec["fuente"] = "Búsqueda web (Claude)"
+        rec["fuente"] = f"Búsqueda web ({SOURCE_LABEL.get(provider, provider)})"
         rec["id"] = make_id("web", norm_url(rec["url"]) or norm_title(rec["titulo"]))
         out.append(rec)
-    log.info("Claude research [%s]: %d candidates", group["name"], len(out))
+    log.info("Web research [%s]: %d candidates", group["name"], len(out))
     return out
 
 
@@ -650,15 +728,15 @@ def send_weekly(cfg: dict, db: dict, preview: bool = False, to: list[str] | None
 
 
 # --------------------------------------------------------------------------- main
-def run_daily(cfg: dict, use_claude: bool) -> None:
+def run_daily(cfg: dict, use_ai: bool) -> None:
     db = load_db()
     items: list[dict] = []
     if cfg["grants_gov"]["enabled"]:
         items += source_grants_gov(cfg)
     if cfg["eu_portal"]["enabled"]:
         items += source_eu_portal(cfg)
-    if use_claude and cfg["claude"]["enabled"]:
-        items += source_claude(cfg, db)
+    if use_ai:
+        items += source_ai(cfg, db)
     merge(db, items)
     added = [r for r in db.values() if r.get("primera_deteccion") == TODAY.isoformat()]
     save_db(db)
@@ -672,7 +750,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="GrantsSeekerAgro")
     ap.add_argument("mode", choices=["setup", "daily", "weekly", "export"])
     ap.add_argument("--topics", help='comma-separated topics for this run only, e.g. "cacao, soil carbon"')
-    ap.add_argument("--no-claude", action="store_true", help="skip the AI web research step")
+    ap.add_argument("--no-ai", "--no-claude", dest="no_ai", action="store_true", help="skip the AI web research step")
+    ap.add_argument("--ai", choices=list(ai.PROVIDERS), help="AI service for this run only")
     ap.add_argument("--preview", action="store_true", help="weekly: display email instead of sending")
     ap.add_argument("--to", nargs="+", help="weekly: override recipients")
     a = ap.parse_args()
@@ -683,12 +762,14 @@ def main() -> None:
     if not cfg.get("output_folder"):
         log.error("output_folder is empty. Run:  python grants_seeker.py setup")
         sys.exit(2)
+    if a.ai:
+        cfg["ai"] = {"provider": a.ai, "model": ""}
     if cfg.get("topics"):
         log.info("Topics: %s", ", ".join(cfg["topics"]))
     log.info("=== %s %s ===", cfg["agent_name"], a.mode)
     try:
         if a.mode == "daily":
-            run_daily(cfg, use_claude=not a.no_claude)
+            run_daily(cfg, use_ai=not a.no_ai)
         elif a.mode == "weekly":
             send_weekly(cfg, load_db(), preview=a.preview, to=a.to)
         else:

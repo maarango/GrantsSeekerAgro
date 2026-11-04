@@ -11,6 +11,10 @@
   },
   "topics": [],
   "research_focus": "Public or private agricultural research institution in Colombia. Interests: agricultural research, technology development and innovation; crops, livestock and animal health, genetic resources, soils and water, climate change adaptation and mitigation, agroecology and agroforestry, bioeconomy, food safety, digital agriculture, technology transfer, capacity building, researcher mobility and fellowships.",
+  "ai": {
+    "provider": "",
+    "model": ""
+  },
   "core_keywords": [
     "agri",
     "agro",
