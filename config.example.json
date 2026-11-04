@@ -1,0 +1,124 @@
+{
+  "agent_name": "GrantsSeekerAgro",
+  "output_folder": "",
+  "excel_filename": "Convocatorias_GrantsSeekerAgro.xlsx",
+  "email": {
+    "to": [],
+    "cc": [],
+    "subject_prefix": "[GrantsSeekerAgro] Resumen semanal de convocatorias",
+    "attach_excel": true,
+    "closing_soon_days": 30
+  },
+  "topics": [],
+  "research_focus": "Public or private agricultural research institution in Colombia. Interests: agricultural research, technology development and innovation; crops, livestock and animal health, genetic resources, soils and water, climate change adaptation and mitigation, agroecology and agroforestry, bioeconomy, food safety, digital agriculture, technology transfer, capacity building, researcher mobility and fellowships.",
+  "core_keywords": [
+    "agri",
+    "agro",
+    "farm",
+    "crop",
+    "livestock",
+    "cattle",
+    "dairy",
+    "soil",
+    "food",
+    "plant health",
+    "plant breeding",
+    "plant genetic",
+    "germplasm",
+    "seed",
+    "pasture",
+    "forage",
+    "aquacult",
+    "fisher",
+    "agroforest",
+    "agroecolog",
+    "rural development",
+    "cocoa",
+    "cacao",
+    "coffee",
+    "rice",
+    "maize",
+    "potato",
+    "fruit",
+    "horticult",
+    "veterinar",
+    "animal health",
+    "pest",
+    "bioeconom"
+  ],
+  "keywords": [
+    "biodiversity",
+    "climate",
+    "adaptation",
+    "water",
+    "land use",
+    "forest",
+    "nutrition",
+    "value chain",
+    "latin america",
+    "colombia",
+    "rural",
+    "genetic",
+    "resilien",
+    "sustainab",
+    "innovation",
+    "smallholder",
+    "nature-based",
+    "ecosystem"
+  ],
+  "grants_gov": {
+    "enabled": true,
+    "queries": [
+      "agriculture international",
+      "food security",
+      "Latin America",
+      "Colombia",
+      "agricultural research",
+      "climate adaptation agriculture",
+      "soil health",
+      "plant genetic resources"
+    ],
+    "rows_per_query": 50
+  },
+  "eu_portal": {
+    "enabled": true,
+    "queries": [
+      "agriculture",
+      "food systems",
+      "soil",
+      "agroecology",
+      "Latin America",
+      "biodiversity agriculture",
+      "climate adaptation farming",
+      "bioeconomy",
+      "livestock",
+      "plant health"
+    ],
+    "page_size": 50
+  },
+  "claude": {
+    "enabled": true,
+    "exe": "",
+    "timeout_minutes": 25,
+    "max_turns": 60,
+    "max_results": 15,
+    "search_groups": [
+      {
+        "name": "Nacional – Minciencias y SGR",
+        "sources": "Minciencias (convocatorias abiertas, Plan de Convocatorias ASCTeI/SGR CTeI, convocatorias de formación, Colombia Científica), Sistema General de Regalías (OCAD, gobernaciones, banco de proyectos CTeI), Minciencias + aliados (Colfuturo, Fulbright, ICETEX, Minciencias–Fullbright, Minciencias–DAAD)."
+      },
+      {
+        "name": "Nacional – sector agropecuario y otros",
+        "sources": "Ministerio de Agricultura y Desarrollo Rural (MADR), ADR, ART, UPRA, Finagro, Banco Agrario, fondos parafiscales (Fedecacao, Fedepanela, Federación Nacional de Cafeteros, Fedegán-FNG, Asohofrucol, Fedearroz, Fenavi, Porkcolombia), Colombia Productiva, iNNpulsa, SENA (SENNOVA, Fondo Emprender), APC-Colombia, Fondo Acción, Patrimonio Natural, Ecopetrol, Ministerio de Ambiente, Fondo para la Vida, Corporaciones Autónomas Regionales."
+      },
+      {
+        "name": "Internacional – multilaterales y Américas",
+        "sources": "FONTAGRO, IICA, FAO, IFAD/FIDA, BID / BID Lab, CAF, Banco Mundial, CGIAR (Alliance Bioversity-CIAT, CIMMYT, CIP, ILRI), GCF, GEF / Small Grants Programme, Adaptation Fund, Euroclima, EU-LAC, CYTED, PROCISUR, PROCITROPICOS, USDA FAS (Borlaug, Cochran), NSF (international collaboration), Inter-American Foundation, OEA, Fondo Verde, Global Crop Diversity Trust (Crop Trust), Benefit-sharing Fund (ITPGRFA)."
+      },
+      {
+        "name": "Internacional – cooperación bilateral y fundaciones",
+        "sources": "Horizon Europe (MSCA, PRIMA, Cluster 6 international cooperation), GIZ, BMZ, BMBF, DAAD, Alexander von Humboldt, AECID, Fundación Carolina, AFD, Agropolis, CIRAD, IRD, JICA, KOICA, IDRC Canada, UKRI / BBSRC / Darwin Initiative / Newton / Royal Society, Swiss NSF / SDC, Netherlands NWO-WOTRO, Bill & Melinda Gates Foundation, Grand Challenges, Rockefeller, Wellcome, Bezos Earth Fund, Global Methane Hub, Belmont Forum, Moore Foundation, TWAS, IFS (International Foundation for Science), ICGEB, OWSD, fundsforngos.org y otros agregadores."
+      }
+    ]
+  }
+}
