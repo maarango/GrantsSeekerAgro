@@ -452,6 +452,14 @@ def source_eu_portal(cfg: dict) -> list[dict]:
 SOURCE_LABEL = {"claude_code": "Claude", "anthropic": "Claude API", "openai": "OpenAI", "gemini": "Gemini"}
 
 
+def normalize_scope(rec: dict) -> str:
+    """AI services sometimes answer 'Nacional / Internacional'; a Colombian funder means national."""
+    amb = (rec.get("ambito") or "").lower()
+    if "colombia" in (rec.get("pais_entidad") or "").lower() or amb.strip().startswith("nacional"):
+        return "Nacional"
+    return "Internacional"
+
+
 def ai_provider(cfg: dict) -> tuple[str, str]:
     """Resolve (provider, model) from config; legacy configs fall back to Claude Code."""
     a = cfg.get("ai") or {}
@@ -516,6 +524,7 @@ def ai_pass(cfg: dict, db: dict, group: dict, provider: str, model: str) -> list
         rec["fecha_apertura"] = parse_date(rec["fecha_apertura"])
         rec["fecha_cierre"] = parse_date(rec["fecha_cierre"])
         rec["fuente"] = f"Búsqueda web ({SOURCE_LABEL.get(provider, provider)})"
+        rec["ambito"] = normalize_scope(rec)
         rec["id"] = make_id("web", norm_url(rec["url"]) or norm_title(rec["titulo"]))
         out.append(rec)
     log.info("Web research [%s]: %d candidates", group["name"], len(out))
@@ -523,6 +532,29 @@ def ai_pass(cfg: dict, db: dict, group: dict, provider: str, model: str) -> list
 
 
 # --------------------------------------------------------------------------- merge
+def find_similar(db: dict, it: dict) -> str | None:
+    """Web results describe the same call with different wording/URLs: match on numbered
+    calls ("Convocatoria 54") from the same funder, or on very similar titles."""
+    import difflib
+    t = norm_title(it["titulo"])
+    num = re.search(r"(?:convocatoria|call|conv)\s*n?\D{0,3}(\d{2,4})", t)
+    funder = norm_title(it.get("entidad", "")).split(" ")[0:1]
+    for k, r in db.items():
+        if r["fuente"].endswith("(API)") or it["fuente"].endswith("(API)"):
+            continue
+        rt = norm_title(r["titulo"])
+        if num:
+            rnum = re.search(r"(?:convocatoria|call|conv)\s*n?\D{0,3}(\d{2,4})", rt)
+            if rnum and rnum.group(1) == num.group(1) and (
+                    not funder or funder[0] in norm_title(r.get("entidad", "")) or
+                    (r.get("fecha_cierre") and r.get("fecha_cierre") == it.get("fecha_cierre"))):
+                return k
+            continue
+        if difflib.SequenceMatcher(None, t, rt).ratio() >= 0.85:
+            return k
+    return None
+
+
 def merge(db: dict, new_items: list[dict]) -> list[dict]:
     """Insert/update items in db. Returns the list of newly discovered records."""
     by_url = {norm_url(r["url"]): k for k, r in db.items() if r.get("url")}
@@ -531,6 +563,8 @@ def merge(db: dict, new_items: list[dict]) -> list[dict]:
     now = TODAY.isoformat()
     for it in new_items:
         key = it["id"] if it["id"] in db else by_url.get(norm_url(it["url"])) or by_title.get(norm_title(it["titulo"]))
+        if not key:
+            key = find_similar(db, it)
         if key and key in db:
             old = db[key]
             for f in FIELDS:

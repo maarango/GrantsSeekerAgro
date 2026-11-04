@@ -19,7 +19,7 @@ An autonomous agent that explores **national (Colombia) and international grant 
   | **Claude Code** | Install [Claude Code](https://claude.com/claude-code) and run `claude` once | Uses your Claude subscription, no API key |
   | **Anthropic API** (Claude) | API key from platform.claude.com, or `ant auth login` | Default model `claude-opus-5-5` |
   | **OpenAI** | API key from platform.openai.com | Default model `gpt-5` |
-  | **Google Gemini** | API key from aistudio.google.com | Default model `gemini-2.5-pro` |
+  | **Google Gemini** | API key from aistudio.google.com | Default model `gemini-2.5-flash` (works on free-tier keys) |
   | **None** | Nothing | Only the official APIs (Grants.gov, EU portal) |
 
   API keys are stored in **Windows Credential Manager** (entry `GrantsSeekerAgro/<service>`), never in files. If the environment variable `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` is set, it takes precedence. API services are billed by the provider per use.

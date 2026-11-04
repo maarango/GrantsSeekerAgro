@@ -35,7 +35,7 @@ PROVIDERS = {
                "default_model": "gpt-5",
                "key_url": "https://platform.openai.com/api-keys"},
     "gemini": {"label": "Google Gemini (API key)", "env": "GEMINI_API_KEY",
-               "default_model": "gemini-2.5-pro",
+               "default_model": "gemini-2.5-flash",
                "key_url": "https://aistudio.google.com/app/apikey"},
     "none": {"label": "None - official APIs only (Grants.gov, EU portal)", "env": None,
              "default_model": ""},
@@ -195,6 +195,19 @@ def _run_openai(prompt: str, model: str, timeout: int) -> str:
     return "\n".join(texts) or data.get("output_text", "")
 
 
+def _raise_for_gemini(r: requests.Response, model: str) -> None:
+    if r.status_code < 400:
+        return
+    if r.status_code == 429:
+        raise ProviderError(f"Gemini quota exceeded for model '{model}'. Free-tier keys usually only allow "
+                            "Flash models (e.g. gemini-2.5-flash); change the model with `setup` or enable billing.")
+    if r.status_code == 404:
+        raise ProviderError(f"Gemini model '{model}' not found - choose another model with `setup`")
+    if r.status_code in (401, 403) or "API_KEY_INVALID" in r.text:
+        raise ProviderError("Gemini API key is invalid or lacks permission - run `python grants_seeker.py setup`")
+    raise ProviderError(f"Gemini API error {r.status_code}: {r.text[:300]}")
+
+
 def _run_gemini(prompt: str, model: str, timeout: int) -> str:
     key = get_key("gemini")
     if not key:
@@ -206,10 +219,7 @@ def _run_gemini(prompt: str, model: str, timeout: int) -> str:
               "tools": [{"google_search": {}}]},
         timeout=timeout,
     )
-    if r.status_code in (400, 401, 403) and "API key" in r.text:
-        raise ProviderError("Gemini API key is invalid - run `python grants_seeker.py setup`")
-    if r.status_code >= 400:
-        raise ProviderError(f"Gemini API error {r.status_code}: {r.text[:300]}")
+    _raise_for_gemini(r, model)
     cands = r.json().get("candidates", [])
     if not cands:
         return ""
@@ -239,16 +249,20 @@ def test(provider: str, model: str, cfg_claude: dict, cwd: Path) -> tuple[bool, 
             r = requests.post("https://api.openai.com/v1/responses", timeout=120,
                               headers={"Authorization": f"Bearer {get_key('openai')}"},
                               json={"model": model, "input": prompt})
-            if r.status_code >= 400:
-                return False, f"HTTP {r.status_code}: {r.text[:200]}"
+            try:
+                _raise_for_gemini(r, model)
+            except ProviderError as e:
+                return False, str(e)
             out = "ok" if r.json().get("output") else r.text[:200]
         elif provider == "gemini":
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"x-goog-api-key": get_key("gemini") or ""}, timeout=120,
                 json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]})
-            if r.status_code >= 400:
-                return False, f"HTTP {r.status_code}: {r.text[:200]}"
+            try:
+                _raise_for_gemini(r, model)
+            except ProviderError as e:
+                return False, str(e)
             out = "ok"
         else:
             return True, "no AI provider"
