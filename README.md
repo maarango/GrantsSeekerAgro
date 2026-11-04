@@ -88,3 +88,6 @@ The tasks run while you are logged on. If the PC is off at the scheduled time, t
 - **Disable the AI search:** choose "None" in `setup`.
 
 > The information is collected automatically. Always check requirements and deadlines on the official page of each call.
+
+## License
+Released under the [MIT License](LICENSE).
