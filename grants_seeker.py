@@ -4,6 +4,8 @@ international grant calls for agricultural research.
 
 Usage:
     python grants_seeker.py setup              # first-time wizard: email, sync folder, topics
+    python grants_seeker.py topics             # view / add / remove saved topics (interactive)
+    python grants_seeker.py topics --add "cacao, irrigation" --remove soils   # edit topics directly
     python grants_seeker.py daily --topics "cacao, soil carbon"   # one-off topic override
     python grants_seeker.py daily              # search sources, update DB, Excel and daily report
     python grants_seeker.py daily --no-claude  # API sources only (fast, no AI web research)
@@ -270,6 +272,94 @@ def run_setup() -> None:
           f"  Topics: {', '.join(topics) or '(default agricultural focus)'}\n"
           f"  AI service: {ai_cfg['provider']} {ai_cfg.get('model', '')}")
     print("Next: run  python grants_seeker.py daily   and   install_tasks.ps1  to schedule it.\n")
+
+
+def _resolve_topic(topics: list[str], token: str) -> int | None:
+    """Index of a topic given by its number (1-based) or its name (case-insensitive)."""
+    token = token.strip()
+    if token.isdigit() and 1 <= int(token) <= len(topics):
+        return int(token) - 1
+    low = [t.lower() for t in topics]
+    return low.index(token.lower()) if token.lower() in low else None
+
+
+def edit_topics(topics: list[str], add: list[str], remove: list[str]) -> tuple[list[str], list[str]]:
+    """Return (new topic list, messages). Removals are resolved against the original numbering."""
+    msgs: list[str] = []
+    drop: set[int] = set()
+    for tok in remove:
+        i = _resolve_topic(topics, tok)
+        if i is None:
+            msgs.append(f"  ! not found: '{tok}'")
+        else:
+            drop.add(i)
+            msgs.append(f"  - removed: {topics[i]}")
+    out = [t for i, t in enumerate(topics) if i not in drop]
+    for t in add:
+        if t.lower() in (x.lower() for x in out):
+            msgs.append(f"  = already present: {t}")
+        else:
+            out.append(t)
+            msgs.append(f"  + added: {t}")
+    return out, msgs
+
+
+def print_topics(topics: list[str]) -> None:
+    if not topics:
+        print("No topics set - the search uses the default broad agricultural focus.")
+        return
+    print(f"Current topics ({len(topics)}):")
+    for i, t in enumerate(topics, 1):
+        print(f"  {i:>2}. {t}")
+
+
+def run_topics(add: list[str], remove: list[str], clear: bool) -> None:
+    """Show / add / remove the saved search topics in config.json (other settings untouched)."""
+    if not CONFIG_PATH.exists():
+        print("config.json not found. Run:  python grants_seeker.py setup")
+        sys.exit(2)
+    cur = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    topics = [t for t in cur.get("topics") or [] if t]
+    original = list(topics)
+
+    if clear:
+        topics = []
+        print("  All topics cleared.")
+    if add or remove:
+        topics, msgs = edit_topics(topics, add, remove)
+        print("\n".join(msgs))
+    elif not clear and sys.stdin and sys.stdin.isatty():
+        # Interactive editor
+        while True:
+            print()
+            print_topics(topics)
+            print("\n  a = add   r = remove   c = clear all   Enter = save and exit   q = quit without saving")
+            choice = input("  Option: ").strip().lower()
+            if choice == "":
+                break
+            if choice == "q":
+                print("No changes saved.")
+                return
+            if choice == "a":
+                new = split_list(input("  Topic(s) to add, comma-separated: "))
+                topics, msgs = edit_topics(topics, new, [])
+                print("\n".join(msgs))
+            elif choice == "r":
+                toks = split_list(input("  Number(s) or name(s) to remove, comma-separated: "))
+                topics, msgs = edit_topics(topics, [], toks)
+                print("\n".join(msgs))
+            elif choice == "c":
+                if input("  Remove ALL topics? [y/N]: ").strip().lower() in ("y", "s", "yes", "si"):
+                    topics = []
+            else:
+                print("  Invalid option.")
+
+    if topics != original:
+        cur["topics"] = topics
+        CONFIG_PATH.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\nSaved to {CONFIG_PATH.name}. Changes apply from the next daily run.")
+    print()
+    print_topics(topics)
 
 
 def load_db() -> dict:
@@ -782,8 +872,13 @@ def run_daily(cfg: dict, use_ai: bool) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="GrantsSeekerAgro")
-    ap.add_argument("mode", choices=["setup", "daily", "weekly", "export"])
+    ap.add_argument("mode", choices=["setup", "topics", "daily", "weekly", "export"])
     ap.add_argument("--topics", help='comma-separated topics for this run only, e.g. "cacao, soil carbon"')
+    ap.add_argument("--add", action="append", default=[], metavar="TOPICS",
+                    help='topics: add saved topic(s), comma-separated, e.g. --add "cacao, irrigation"')
+    ap.add_argument("--remove", action="append", default=[], metavar="TOPICS",
+                    help='topics: remove saved topic(s) by name or number, e.g. --remove soils --remove 3')
+    ap.add_argument("--clear", action="store_true", help="topics: remove all saved topics")
     ap.add_argument("--no-ai", "--no-claude", dest="no_ai", action="store_true", help="skip the AI web research step")
     ap.add_argument("--ai", choices=list(ai.PROVIDERS), help="AI service for this run only")
     ap.add_argument("--preview", action="store_true", help="weekly: display email instead of sending")
@@ -791,6 +886,10 @@ def main() -> None:
     a = ap.parse_args()
     if a.mode == "setup":
         run_setup()
+        return
+    if a.mode == "topics":
+        run_topics([t for x in a.add for t in split_list(x)],
+                   [t for x in a.remove for t in split_list(x)], a.clear)
         return
     cfg = load_config(split_list(a.topics) if a.topics else None)
     if not cfg.get("output_folder"):

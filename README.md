@@ -52,6 +52,10 @@ Your answers are saved in `config.json`, which **stays on your machine and is ne
 ## Commands
 ```powershell
 python grants_seeker.py setup                                   # configure email, folder, topics
+python grants_seeker.py topics                                  # view / add / remove saved topics (interactive menu)
+python grants_seeker.py topics --add "cacao, irrigation"        # add topic(s)
+python grants_seeker.py topics --remove soils --remove 3        # remove by name or list number
+python grants_seeker.py topics --clear                          # remove all (back to broad agricultural focus)
 python grants_seeker.py daily                                   # full search
 python grants_seeker.py daily --no-ai                           # APIs only (fast)
 python grants_seeker.py daily --ai openai                       # another AI service for this run only
