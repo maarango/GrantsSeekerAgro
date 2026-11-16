@@ -9,8 +9,8 @@ Usage:
     python grants_seeker.py daily --topics "cacao, soil carbon"   # one-off topic override
     python grants_seeker.py daily              # search sources, update DB, Excel and daily report
     python grants_seeker.py daily --no-claude  # API sources only (fast, no AI web research)
-    python grants_seeker.py weekly             # send the weekly email digest via Outlook
-    python grants_seeker.py weekly --preview   # open the email in Outlook without sending
+    python grants_seeker.py weekly             # send the weekly email digest (Outlook or SMTP)
+    python grants_seeker.py weekly --preview   # open the email without sending
     python grants_seeker.py export             # only regenerate the Excel file
 """
 from __future__ import annotations
@@ -204,6 +204,90 @@ def setup_ai(cur: dict, defaults: dict) -> dict:
     return {"provider": provider, "model": model}
 
 
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def setup_sender(cur_email: dict) -> dict:
+    """Wizard step: how the weekly email is sent (Outlook desktop or any provider via SMTP)."""
+    import getpass
+    import mailer
+
+    def ask(q: str, default: str = "") -> str:
+        return input(f"{q}" + (f" [{default}]" if default else "") + ": ").strip() or default
+
+    cur_method = cur_email.get("method", "outlook")
+    print("   How should it be sent?")
+    print("   1. Outlook desktop app (uses an account already signed in to Outlook)")
+    print("   2. Any email provider via SMTP (Gmail, Yahoo, iCloud, Zoho, your institution's server...)")
+    while True:
+        choice = ask("   Choose an option", "2" if cur_method == "smtp" else "1")
+        if choice in ("1", "2"):
+            break
+        print("   Invalid option.")
+
+    if choice == "1":
+        while True:
+            sender = ask("   Send from (an account in Outlook; Enter = keep, 'default' = Outlook's default account)",
+                         cur_email.get("from", "") if cur_method == "outlook" else "")
+            if sender.lower() == "default":
+                sender = ""
+            if not sender or EMAIL_RE.fullmatch(sender):
+                return {"method": "outlook", "from": sender}
+            print("   Please enter a valid email address.")
+
+    cur_smtp = cur_email.get("smtp", {}) if cur_method == "smtp" else {}
+    while True:
+        sender = ask("   Sender email address", cur_email.get("from", "") if cur_method == "smtp" else "")
+        if EMAIL_RE.fullmatch(sender):
+            break
+        print("   Please enter a valid email address.")
+    sender_name = ask("   Sender display name", cur_email.get("from_name") or "GrantsSeekerAgro")
+
+    preset = mailer.preset_for(sender)
+    same_domain = cur_smtp and cur_email.get("from", "").rsplit("@", 1)[-1] == sender.rsplit("@", 1)[-1]
+    if same_domain:
+        host, port, security = cur_smtp["host"], cur_smtp["port"], cur_smtp.get("security", "starttls")
+    elif preset:
+        host, port, security = preset
+    else:
+        host, port, security = f"smtp.{sender.rsplit('@', 1)[-1]}", 587, "starttls"
+        print("   Unknown provider: check the SMTP server with your email provider or IT department.")
+    host = ask("   SMTP server", host)
+    while True:
+        port_s = ask("   Port", str(port))
+        if port_s.isdigit():
+            port = int(port_s)
+            break
+        print("   The port must be a number.")
+    while True:
+        security = ask(f"   Security ({' / '.join(mailer.SECURITY)})", security).lower()
+        if security in mailer.SECURITY:
+            break
+        print("   Invalid option.")
+    username = ask("   Username", cur_smtp.get("username") or sender)
+    smtp_cfg = {"host": host, "port": port, "security": security, "username": username}
+
+    if host in mailer.APP_PASSWORD_HELP:
+        print(f"   Note: {mailer.APP_PASSWORD_HELP[host]}")
+    have = mailer.get_password(username)
+    hint = ", Enter = keep stored password" if have else ""
+    while True:
+        pw = getpass.getpass(f"   Password / app password (hidden{hint}): ").strip()
+        if pw:
+            break
+        if have:
+            pw = None
+            break
+        print("   A password is required.")
+    if input("   Test the login now (nothing is sent)? [Y/n]: ").strip().lower() in ("", "y", "s", "yes", "si"):
+        ok, msg = mailer.test_login(smtp_cfg, pw)
+        print("   Login OK." if ok else f"   Login FAILED: {msg}\n   You can re-run setup later.")
+    if pw:
+        mailer.set_password(username, pw)
+        print(f"   Password saved in Windows Credential Manager (GrantsSeekerAgro/smtp:{username.lower()}).")
+    return {"method": "smtp", "from": sender, "from_name": sender_name, "smtp": smtp_cfg}
+
+
 def run_setup() -> None:
     """Interactive first-time / re-configuration wizard. Writes config.json."""
     cur = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
@@ -216,12 +300,13 @@ def run_setup() -> None:
     print("=" * 64 + "\n GrantsSeekerAgro - setup\n" + "=" * 64)
 
     # 1) Email
-    print("\n1) Weekly digest email (sent through your Outlook desktop app).")
+    print("\n1) Weekly digest email.")
     while True:
         emails = split_list(ask("   Recipient email(s), comma-separated", ", ".join(cur.get("email", {}).get("to", []))))
-        if emails and all(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) for e in emails):
+        if emails and all(EMAIL_RE.fullmatch(e) for e in emails):
             break
         print("   Please enter at least one valid email address.")
+    email_cfg = setup_sender(cur.get("email", {}))
 
     # 2) Sync folder
     print("\n2) Where should the calls be synced? (Excel + daily/weekly reports)")
@@ -265,10 +350,12 @@ def run_setup() -> None:
     ai_cfg = setup_ai(cur, defaults)
 
     new = dict(cur)
-    new.update({"email": {**cur.get("email", {}), "to": emails}, "output_folder": str(folder),
+    new.update({"email": {**cur.get("email", {}), **email_cfg, "to": emails}, "output_folder": str(folder),
                 "topics": topics, "research_focus": focus, "ai": ai_cfg})
     CONFIG_PATH.write_text(json.dumps(new, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\nSaved {CONFIG_PATH.name}.  Email: {', '.join(emails)}\n  Folder: {folder}\n"
+    sender_desc = email_cfg["from"] or "Outlook default account"
+    print(f"\nSaved {CONFIG_PATH.name}.  Email: {', '.join(emails)}  (from: {sender_desc}, via {email_cfg['method']})\n"
+          f"  Folder: {folder}\n"
           f"  Topics: {', '.join(topics) or '(default agricultural focus)'}\n"
           f"  AI service: {ai_cfg['provider']} {ai_cfg.get('model', '')}")
     print("Next: run  python grants_seeker.py daily   and   install_tasks.ps1  to schedule it.\n")
@@ -819,13 +906,48 @@ Información recopilada automáticamente; verifique requisitos y fechas en la p�
 
 
 def send_weekly(cfg: dict, db: dict, preview: bool = False, to: list[str] | None = None) -> None:
-    import win32com.client  # pywin32
-
     body, n_new, n_closing = build_email_html(cfg, db)
     out_dir = Path(cfg["output_folder"]) / "Reportes_semanales"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{TODAY.isoformat()}_resumen_semanal.html").write_text(
         f"<html><head><meta charset='utf-8'></head><body>{body}</body></html>", encoding="utf-8")
+    subject = f"{cfg['email']['subject_prefix']} – {TODAY.isoformat()} ({n_new} nuevas, {n_closing} cierran pronto)"
+    xlsx = Path(cfg["output_folder"]) / cfg["excel_filename"] if cfg["email"].get("attach_excel") else None
+
+    if cfg["email"].get("method", "outlook") == "smtp":
+        send_weekly_smtp(cfg, body, subject, xlsx, out_dir, preview, to)
+    else:
+        send_weekly_outlook(cfg, body, subject, xlsx, out_dir, preview, to)
+
+
+def send_weekly_smtp(cfg: dict, body: str, subject: str, xlsx: Path | None, out_dir: Path,
+                     preview: bool, to: list[str] | None) -> None:
+    import mailer
+
+    em = cfg["email"]
+    sender = (em.get("from") or "").strip()
+    if not sender or not em.get("smtp", {}).get("host"):
+        log.error("email.method is 'smtp' but email.from / email.smtp.host are not set. Run: python grants_seeker.py setup")
+        return
+    msg = mailer.build_message(sender, to or em["to"], em.get("cc") or [], subject, body, xlsx,
+                               em.get("from_name", ""))
+    if preview:
+        eml = out_dir / f"{TODAY.isoformat()}_resumen_semanal.eml"
+        eml.write_bytes(bytes(msg))
+        os.startfile(eml)  # opens in the default mail app
+        log.info("Weekly email saved for preview (not sent): %s", eml)
+        return
+    try:
+        mailer.send(em["smtp"], msg)
+    except Exception as e:  # noqa: BLE001
+        log.error("SMTP sending failed (%s). The digest was saved in %s", e, out_dir)
+        return
+    log.info("Weekly email sent from %s to %s", sender, msg["To"])
+
+
+def send_weekly_outlook(cfg: dict, body: str, subject: str, xlsx: Path | None, out_dir: Path,
+                        preview: bool, to: list[str] | None) -> None:
+    import win32com.client  # pywin32
 
     try:
         outlook = win32com.client.Dispatch("Outlook.Application")
@@ -833,15 +955,22 @@ def send_weekly(cfg: dict, db: dict, preview: bool = False, to: list[str] | None
         log.error("Outlook desktop is not available (%s). The digest was saved in %s", e, out_dir)
         return
     mail = outlook.CreateItem(0)
+    sender = (cfg["email"].get("from") or "").strip()
+    if sender:
+        accounts = list(outlook.Session.Accounts)
+        account = next((a for a in accounts if (a.SmtpAddress or "").lower() == sender.lower()), None)
+        if account is not None:
+            mail.SendUsingAccount = account
+        else:
+            log.warning("email.from %s is not an account in Outlook (available: %s); sending from the default account",
+                        sender, ", ".join(a.SmtpAddress for a in accounts) or "none")
     mail.To = "; ".join(to or cfg["email"]["to"])
     if cfg["email"].get("cc"):
         mail.CC = "; ".join(cfg["email"]["cc"])
-    mail.Subject = f"{cfg['email']['subject_prefix']} – {TODAY.isoformat()} ({n_new} nuevas, {n_closing} cierran pronto)"
+    mail.Subject = subject
     mail.HTMLBody = body
-    if cfg["email"].get("attach_excel"):
-        xlsx = Path(cfg["output_folder"]) / cfg["excel_filename"]
-        if xlsx.exists():
-            mail.Attachments.Add(str(xlsx))
+    if xlsx and xlsx.exists():
+        mail.Attachments.Add(str(xlsx))
     if preview:
         mail.Display()
         log.info("Weekly email opened for preview (not sent)")

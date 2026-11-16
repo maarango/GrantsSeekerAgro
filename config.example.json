@@ -3,6 +3,15 @@
   "output_folder": "",
   "excel_filename": "Convocatorias_GrantsSeekerAgro.xlsx",
   "email": {
+    "method": "outlook",
+    "from": "",
+    "from_name": "GrantsSeekerAgro",
+    "smtp": {
+      "host": "",
+      "port": 587,
+      "security": "starttls",
+      "username": ""
+    },
     "to": [],
     "cc": [],
     "subject_prefix": "[GrantsSeekerAgro] Resumen semanal de convocatorias",
