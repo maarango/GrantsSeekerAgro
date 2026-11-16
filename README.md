@@ -7,11 +7,15 @@ An autonomous agent that explores **national (Colombia) and international grant 
 | When | What |
 |---|---|
 | **Daily, 07:00** | 1. Queries official APIs: **Grants.gov** (USA) and **EU Funding & Tenders** (Horizon Europe and others), using your topics.<br>2. Runs an **AI web search** (Claude Code, Anthropic API, OpenAI or Gemini - your choice) over national sources (Minciencias, SGR, MADR, SENA, iNNpulsa, APC…) and international ones (FONTAGRO, IICA, FAO, IFAD, IDB, CGIAR, GCF/GEF, IDRC, Gates, UKRI, GIZ, AECID, JICA, CYTED…), prioritizing your topics.<br>3. Removes duplicates, updates the local database and writes the outputs to your sync folder. |
-| **Weekly, Monday 09:00** | Sends an HTML email (through Outlook) with the week's new national and international calls and the calls closing within 30 days, with the Excel file attached. |
+| **Weekly, Monday 09:00** | Sends an HTML email (through Outlook or any email provider) with the week's new national and international calls and the calls closing within 30 days, with the Excel file attached. |
 
 ## Requirements
 - Windows 10/11 with **Python 3.10+**
-- **Outlook desktop** (classic) signed in, used to send the weekly email. Without Outlook, the digest is still saved as HTML in the sync folder.
+- **A way to send the weekly email** (chosen in `setup`):
+  - **Outlook desktop** (classic), signed in. It sends from Outlook's default account or from the account you set in `email.from`.
+  - **Any email provider via SMTP**: Gmail, Yahoo, iCloud, Zoho, AOL, GMX, Proton, your institution's server, and so on. The wizard fills in the server settings for common providers. Most providers require an **app password** instead of your normal password, and Microsoft accounts and Microsoft 365 often block SMTP passwords, so use the Outlook method for those. The password is stored in **Windows Credential Manager** (entry `GrantsSeekerAgro/smtp:<username>`), or taken from the `GRANTSSEEKER_SMTP_PASSWORD` environment variable.
+
+  If sending fails, the digest is still saved as HTML in the sync folder.
 - **One AI service for the web research** (optional; chosen in `setup`):
 
   | Service | How you sign in | Notes |
@@ -36,7 +40,7 @@ powershell -ExecutionPolicy Bypass -File install_tasks.ps1   # schedule daily an
 
 ### Setup wizard
 `python grants_seeker.py setup` asks for:
-1. **Email(s)** to receive the weekly digest.
+1. **Email(s)** to receive the weekly digest, and **how to send it**: through Outlook, optionally from a specific Outlook account (`email.from`), or from any email address via SMTP (sender, display name, server, port, security, username and password, with an optional login test that sends nothing).
 2. **Where to sync the calls.** It detects OneDrive (personal and work), Google Drive, Dropbox, iCloud Drive and Documents, or you can give any path.
 3. **Topics to explore**, for example `cacao, soil carbon, livestock methane, agroforestry`. English works best for the international APIs. Leave it empty for a broad agricultural focus.
 4. **Institution profile** (optional), which guides the AI search.
@@ -52,11 +56,15 @@ Your answers are saved in `config.json`, which **stays on your machine and is ne
 ## Commands
 ```powershell
 python grants_seeker.py setup                                   # configure email, folder, topics
+python grants_seeker.py topics                                  # view / add / remove saved topics (interactive menu)
+python grants_seeker.py topics --add "cacao, irrigation"        # add topic(s)
+python grants_seeker.py topics --remove soils --remove 3        # remove by name or list number
+python grants_seeker.py topics --clear                          # remove all (back to broad agricultural focus)
 python grants_seeker.py daily                                   # full search
 python grants_seeker.py daily --no-ai                           # APIs only (fast)
 python grants_seeker.py daily --ai openai                       # another AI service for this run only
 python grants_seeker.py daily --topics "coffee rust, irrigation" # topics for this run only
-python grants_seeker.py weekly --preview                        # open the email in Outlook without sending
+python grants_seeker.py weekly --preview                        # open the email without sending (SMTP: saves an .eml)
 python grants_seeker.py weekly                                  # send the email
 python grants_seeker.py export                                  # regenerate the Excel file only
 ```

@@ -49,29 +49,38 @@ class ProviderError(RuntimeError):
 
 
 # --------------------------------------------------------------------------- credentials
-def get_key(provider: str) -> str | None:
-    env = PROVIDERS[provider].get("env")
-    if env and os.environ.get(env):
-        return os.environ[env]
+def get_secret(name: str) -> str | None:
+    """Read a secret stored in Windows Credential Manager under GrantsSeekerAgro/<name>."""
     try:
         import win32cred
-        cred = win32cred.CredRead(CRED_PREFIX + provider, win32cred.CRED_TYPE_GENERIC)
+        cred = win32cred.CredRead(CRED_PREFIX + name, win32cred.CRED_TYPE_GENERIC)
         blob = cred["CredentialBlob"]
         return blob.decode("utf-16-le") if isinstance(blob, bytes) else str(blob)
     except Exception:  # noqa: BLE001 - not stored / not on Windows
         return None
 
 
-def set_key(provider: str, key: str) -> None:
+def set_secret(name: str, value: str, comment: str = "Secret used by GrantsSeekerAgro") -> None:
     import win32cred
     win32cred.CredWrite({
         "Type": win32cred.CRED_TYPE_GENERIC,
-        "TargetName": CRED_PREFIX + provider,
-        "UserName": provider,
-        "CredentialBlob": key,
+        "TargetName": CRED_PREFIX + name,
+        "UserName": name,
+        "CredentialBlob": value,
         "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
-        "Comment": "API key used by GrantsSeekerAgro",
+        "Comment": comment,
     }, 0)
+
+
+def get_key(provider: str) -> str | None:
+    env = PROVIDERS[provider].get("env")
+    if env and os.environ.get(env):
+        return os.environ[env]
+    return get_secret(provider)
+
+
+def set_key(provider: str, key: str) -> None:
+    set_secret(provider, key, "API key used by GrantsSeekerAgro")
 
 
 def delete_key(provider: str) -> None:
